@@ -18,7 +18,7 @@ To install the software client on your machine, your machine must have:
 
 Clone this repository to your local machine:
 ```bash
-git clone <link>
+git clone https://github.com/MCS18-2022/aaads-client.git
 ```
 
 To avoid polluting the global environment, it is suggested that you create a local virtual environment. Within the cloned repository:
