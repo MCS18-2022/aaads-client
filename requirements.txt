@@ -1,0 +1,11 @@
+# For image manipulation.
+opencv-python-headless
+
+# For GUI support.
+pyqt6
+
+# For database operations.
+firebase-admin
+
+# For running unit tests.
+pytest
