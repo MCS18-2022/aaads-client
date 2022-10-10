@@ -77,7 +77,6 @@ class Worker(QObject):
         upload(os.path.join("pending", frames_dir))
 
         # Tell the UI thread the frames are uploaded.
-        print("Frames uploaded")
         self.framesUploaded.emit()
 
         # Wait for the model predictions to be available
@@ -86,7 +85,6 @@ class Worker(QObject):
             preds = download_preds()
             try:
                 preds[frames_dir]
-                print("Preds received")
                 self.predsReceived.emit()
                 break
             # If there is no prediction yet, keep waiting.
@@ -106,7 +104,6 @@ class Worker(QObject):
             writer.write(frame)
         writer.release()
 
-        print("Vid write finished")
         self.vidWriteFinished.emit()
 
 
@@ -122,6 +119,7 @@ class MainWindow(QMainWindow):
         self._createActions()
         self._createMenuBar()
         self._createToolBar()
+        self._createStatusBar()
 
     def _createMenuBar(self):
         menuBar = self.menuBar()
@@ -145,6 +143,10 @@ class MainWindow(QMainWindow):
         exitIcon = style.standardIcon(QStyle.StandardPixmap.SP_BrowserStop)
         self.exitAction = QAction(exitIcon, " &Exit", self)
         self.exitAction.triggered.connect(MainWindow._exit_app)
+    
+    def _createStatusBar(self):
+        self.statusBar = self.statusBar()
+        self.statusBar.showMessage("On standby...")
 
     def _process_video(self):
         # Open a stream for reading the input video.
@@ -167,6 +169,10 @@ class MainWindow(QMainWindow):
         self.thread.finished.connect(self.thread.deleteLater)
 
         self.thread.start()
+        self.statusBar.showMessage("Uploading video frames...")
+        self.worker.framesUploaded.connect(lambda: self.statusBar.showMessage("Waiting for model predictions..."))
+        self.worker.predsReceived.connect(lambda: self.statusBar.showMessage("Writing video to file..."))
+        self.worker.vidWriteFinished.connect(lambda: self.statusBar.showMessage("On standby..."))
         self.thread.finished.connect(
             lambda: self.centralWidget.loadVideo(vid_out_filename)
         )
