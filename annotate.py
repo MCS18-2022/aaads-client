@@ -127,7 +127,7 @@ def _center(box):
 
 def _midpoint(pt1, pt2):
     """
-    Return the midpoint of two boxes.
+    Return the midpoint of two points.
 
     Parameters:
     pt1 : A point represented as (x1, y1).
