@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtMultimedia import QMediaPlayer
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtGui import QAction
-from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtCore import Qt, QUrl, QObject, pyqtSignal, QThread
 import cv2
 import os
 import sys
@@ -31,6 +31,83 @@ from db import upload, download_preds
 
 FRAMES_DIR = os.path.join(".", "frames")
 FILENAME_PAT = os.path.join(FRAMES_DIR, "frame_{:0{}d}.jpg")
+
+
+class Worker(QObject):
+
+    framesUploaded = pyqtSignal()
+    predsReceived = pyqtSignal()
+    vidWriteFinished = pyqtSignal()
+
+    def __init__(self, vid_in_filename, *parents):
+        super().__init__(*parents)
+        self.vid_in_filename = vid_in_filename
+
+    def run(self):
+        vid_in_filename = self.vid_in_filename
+        capture = cv2.VideoCapture(vid_in_filename)
+
+        # Retrieve video metadata.
+        frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT)
+        id_length = max(int(log10(frame_count)) + 1, 1)
+        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        dims = (width, height)
+        fps = capture.get(cv2.CAP_PROP_FPS)
+
+        # Create a lazy iterator over the images in the input video stream.
+        frames = stream_to_imgs(capture)
+
+        # Segment the video into raw frames, and upload them.
+        frames_dir = Path(vid_in_filename).stem
+        if not os.path.exists(frames_dir):
+            os.mkdir(frames_dir)
+        for _id, frame in enumerate(frames, start=1):
+            frame_out_filename = os.path.join(
+                frames_dir, "frame_{:0{}d}.jpg".format(_id, id_length)
+            )
+            cv2.imwrite(frame_out_filename, frame)
+            upload(frame_out_filename)
+        
+        # Clean up to prevent memory leaks.
+        capture.release()
+        shutil.rmtree(frames_dir)
+
+        # Push job to server side command queue.
+        upload(os.path.join("pending", frames_dir))
+
+        # Tell the UI thread the frames are uploaded.
+        print("Frames uploaded")
+        self.framesUploaded.emit()
+
+        # Wait for the model predictions to be available
+        # from the server.
+        while True:
+            preds = download_preds()
+            try:
+                preds[frames_dir]
+                print("Preds received")
+                self.predsReceived.emit()
+                break
+            # If there is no prediction yet, keep waiting.
+            except (KeyError, AttributeError, TypeError):
+                pass
+        
+        # Put the annotations over the video frames, and tie
+        # the frames together into a video.
+        capture = cv2.VideoCapture(vid_in_filename)
+        frames = stream_to_imgs(capture)
+        vid_out_filename = os.path.join("output", f"annotated_{frames_dir}.mp4")
+        writer = cv2.VideoWriter(
+            vid_out_filename, cv2.VideoWriter_fourcc(*"mp4v"), fps, dims
+        )
+        for frame, pred in zip(frames, preds[frames_dir]):
+            frame = annotated(frame, pred)
+            writer.write(frame)
+        writer.release()
+
+        print("Vid write finished")
+        self.vidWriteFinished.emit()
 
 
 class MainWindow(QMainWindow):
@@ -77,63 +154,22 @@ class MainWindow(QMainWindow):
         assert vid_in_filename.endswith(
             (".mp4", ".MP4")
         ), "Attempt to process a non-supported file."
-        capture = cv2.VideoCapture(vid_in_filename)
 
-        # Retrieve video metadata.
-        frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT)
-        id_length = max(int(log10(frame_count)) + 1, 1)
-        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        dims = (width, height)
-        fps = capture.get(cv2.CAP_PROP_FPS)
-
-        # Create a lazy iterator over the images in the input video stream.
-        frames = stream_to_imgs(capture)
-
-        # Segment the video into raw frames, and upload them.
         frames_dir = Path(vid_in_filename).stem
-        if not os.path.exists(frames_dir):
-            os.mkdir(frames_dir)
-        for _id, frame in enumerate(frames, start=1):
-            frame_out_filename = os.path.join(
-                frames_dir, "frame_{:0{}d}.jpg".format(_id, id_length)
-            )
-            cv2.imwrite(frame_out_filename, frame)
-            upload(frame_out_filename)
-
-        # Clean up to prevent memory leaks.
-        capture.release()
-        shutil.rmtree(frames_dir)
-
-        # Push job to server side command queue.
-        upload(os.path.join("pending", frames_dir))
-
-        # Wait for the model predictions to be available
-        # from the server.
-        while True:
-            preds = download_preds()
-            try:
-                preds[frames_dir]
-                break
-            # If there is no prediction yet, keep waiting.
-            except (KeyError, AttributeError, TypeError):
-                pass
-
-        # Put the annotations over the video frames, and tie
-        # the frames together into a video.
-        capture = cv2.VideoCapture(vid_in_filename)
-        frames = stream_to_imgs(capture)
         vid_out_filename = os.path.join("output", f"annotated_{frames_dir}.mp4")
-        writer = cv2.VideoWriter(
-            vid_out_filename, cv2.VideoWriter_fourcc(*"mp4v"), fps, dims
-        )
-        for frame, pred in zip(frames, preds[frames_dir]):
-            frame = annotated(frame, pred)
-            writer.write(frame)
-        writer.release()
 
-        # Play the annotated video.
-        self.centralWidget.loadVideo(vid_out_filename)
+        self.thread = QThread()
+        self.worker = Worker(vid_in_filename)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.vidWriteFinished.connect(self.thread.quit)
+        self.worker.vidWriteFinished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+
+        self.thread.start()
+        self.thread.finished.connect(
+            lambda: self.centralWidget.loadVideo(vid_out_filename)
+        )
 
     @staticmethod
     def _exit_app():
