@@ -153,9 +153,9 @@ class MainWindow(QMainWindow):
         vid_in_filename, _ = QFileDialog.getOpenFileName(self, "Select video (.mp4)...")
         if vid_in_filename == "":
             return
-        assert vid_in_filename.endswith(
-            (".mp4", ".MP4")
-        ), "Attempt to process a non-supported file."
+        if not vid_in_filename.endswith((".mp4", ".MP4")):
+            self.statusBar.showMessage(f"Attempted to process a non-supported file ({Path(vid_in_filename).name})")
+            return
 
         frames_dir = Path(vid_in_filename).stem
         vid_out_filename = os.path.join("output", f"annotated_{frames_dir}.mp4")
