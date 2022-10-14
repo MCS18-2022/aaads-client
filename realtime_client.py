@@ -48,7 +48,9 @@ class Worker(QThread):
 
                 frame = cv2.flip(frame, 1)
 
-                path = Path("webcam_up", f"frame_{_id:05}.png")
+                frames_dir = Path("video_capture")
+                frames_dir.mkdir(exist_ok=True)
+                path = Path("video_capture", f"frame_{_id:05}.png")
                 cv2.imwrite(str(path), frame)
                 upload(str(path))
                 realtime_db_ref.child("pending").set({"id": path.stem})
