@@ -3,9 +3,6 @@ from firebase_admin import credentials, storage, db
 from pathlib import Path
 
 
-__all__ = ("upload", "download_preds")
-
-
 """
 Firebase Storage Database.
 
