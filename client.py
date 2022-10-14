@@ -74,7 +74,11 @@ class Worker(QObject):
         shutil.rmtree(frames_dir)
 
         # Push job to server side command queue.
+        if not os.path.exists("pending"):
+            os.mkdir("pending")
+        Path("pending", frames_dir).touch()
         upload(os.path.join("pending", frames_dir))
+        shutil.rmtree("pending")
 
         # Tell the UI thread the frames are uploaded.
         self.framesUploaded.emit()
@@ -91,6 +95,9 @@ class Worker(QObject):
             except (KeyError, AttributeError, TypeError):
                 pass
         
+        if not os.path.exists("output"):
+            os.mkdir("output")
+
         # Put the annotations over the video frames, and tie
         # the frames together into a video.
         capture = cv2.VideoCapture(vid_in_filename)
